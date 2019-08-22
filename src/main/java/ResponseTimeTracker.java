@@ -11,6 +11,10 @@ import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 
 
+/**
+ * Tracks time per request to be used for dumping statistics as well as adding execution time
+ * to response header.
+ */
 class ResponseTimeTracker implements HttpResponseInterceptor, Tracker {
     // Key is URI and value is list of unsorted time duration for each URI for quick addition.
     private final ConcurrentHashMap<String, List<Long>> uriResponseTime = new ConcurrentHashMap<>();

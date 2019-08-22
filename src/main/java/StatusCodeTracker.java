@@ -7,6 +7,10 @@ import java.io.IOException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.LongAdder;
 
+
+/**
+ * Tracks status code and corresponding frequency count.
+ */
 class StatusCodeTracker implements HttpResponseInterceptor, Tracker {
     // Key is URI and value is map of status code and corresponding counter.
     private final ConcurrentHashMap<String, ConcurrentHashMap<Integer, LongAdder>> uriStatusCodeFrequenyCount
