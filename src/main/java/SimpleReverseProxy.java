@@ -30,19 +30,16 @@
  */
 
 
-
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.LongAdder;
 
-import com.google.common.collect.ImmutableList;
+
 import org.apache.http.*;
 import org.apache.http.impl.DefaultBHttpClientConnection;
 import org.apache.http.impl.DefaultBHttpServerConnection;
@@ -75,9 +72,6 @@ public class SimpleReverseProxy {
     private static final String HTTP_IN_CONN = "http.proxy.in-conn";
     private static final String HTTP_OUT_CONN = "http.proxy.out-conn";
     private static final String HTTP_CONN_KEEPALIVE = "http.proxy.conn-keepalive";
-
-    private static final String HTTP_REQUEST_URI = "http.proxy.request.uri";
-    private static final String HTTP_REQUEST_START_TIME = "http.proxy.request.start_time";
 
     private static final StatusCodeTracker statusCodeTracker = new StatusCodeTracker();
     private static final ResponseTimeTracker timeTracker = new ResponseTimeTracker();
@@ -185,7 +179,7 @@ public class SimpleReverseProxy {
 
             final boolean keepalive = this.connStrategy.keepAlive(response, context);
             context.setAttribute(HTTP_CONN_KEEPALIVE, new Boolean(keepalive));
-            context.setAttribute(HTTP_REQUEST_URI, request.getRequestLine().getUri());
+            context.setAttribute(Constants.HTTP_REQUEST_URI, request.getRequestLine().getUri());
         }
     }
 
@@ -197,7 +191,7 @@ public class SimpleReverseProxy {
 
         public RequestListenerThread(final int port, final HttpHost target,
                                      final StatusCodeTracker statusCodeTracker,
-                                     final ResponseTimeTracker uriResponseTime) throws IOException {
+                                     final ResponseTimeTracker responseTimeTracker) throws IOException {
             this.target = target;
             this.serversocket = new ServerSocket(port);
 
@@ -208,7 +202,7 @@ public class SimpleReverseProxy {
                     new ResponseContent(),
                     new ResponseConnControl(),
                     statusCodeTracker,
-                    uriResponseTime);
+                    responseTimeTracker);
 
             // Set up HTTP protocol processor for outgoing connections
             final HttpProcessor outhttpproc = new ImmutableHttpProcessor(
@@ -294,7 +288,7 @@ public class SimpleReverseProxy {
                         break;
                     }
 
-                    context.setAttribute(HTTP_REQUEST_START_TIME, System.nanoTime());
+                    context.setAttribute(Constants.HTTP_REQUEST_START_TIME, System.nanoTime());
 
                     this.httpservice.handleRequest(this.inconn, context);
 
@@ -319,97 +313,6 @@ public class SimpleReverseProxy {
                     this.outconn.shutdown();
                 } catch (final IOException ignore) {}
             }
-        }
-    }
-
-    interface Tracker {
-        void dumpStats();
-    }
-
-    static class StatsRunner implements Runnable {
-        private final List<Tracker> trackers;
-
-        public StatsRunner(List<Tracker> trackers) {
-            this.trackers = trackers;
-        }
-
-        @Override
-        public void run() {
-            try {
-                for (Tracker tracker : trackers) {
-                    tracker.dumpStats();
-                }
-            } catch (Exception e) {
-                System.err.println("Error in executing statistics dumper. It will no longer be run!");
-                e.printStackTrace();
-                throw new RuntimeException(e);
-            }
-        }
-    }
-
-    static class StatusCodeTracker implements HttpResponseInterceptor, Tracker {
-        // Key is URI and value is map of status code and corresponding counter.
-        private final ConcurrentHashMap<String, ConcurrentHashMap<Integer, LongAdder>> uriStatusCodeFrequenyCount = new ConcurrentHashMap<>();
-
-        public void process(HttpResponse response, HttpContext context) throws HttpException, IOException {
-            System.out.println("Running status code interceptor");
-            String uri = (String)context.getAttribute(HTTP_REQUEST_URI);
-            Integer statusCode = response.getStatusLine().getStatusCode();
-
-            uriStatusCodeFrequenyCount.computeIfAbsent(uri, v -> new ConcurrentHashMap<>())
-                    .computeIfAbsent(statusCode, k -> new LongAdder()).increment();
-        }
-
-        public void dumpStats() {
-            System.out.println("Dumping status code statistics...");
-            for (ConcurrentHashMap.Entry<String, ConcurrentHashMap<Integer, LongAdder>> pair : uriStatusCodeFrequenyCount.entrySet()) {
-                String uri = pair.getKey();
-                for (ConcurrentHashMap.Entry<Integer, LongAdder> statusCodeCount : pair.getValue().entrySet()) {
-                    System.out.println("URI: " + uri + " status: " + statusCodeCount.getKey() + " count: " + statusCodeCount.getValue());
-                }
-            }
-        }
-    }
-
-    static class ResponseTimeTracker implements HttpResponseInterceptor, Tracker {
-        // Key is URI and value is list of unsorted time duration for each URI for quick addition.
-        private final ConcurrentHashMap<String, List<Long>> uriResponseTime = new ConcurrentHashMap<>();
-        private static final List<Integer> PERCENTILES = ImmutableList.of(25, 50, 75, 90, 99);
-        private static final String EXECUTION_TIME_HEADER_KEY = "X-execution.time";
-
-
-        public void process(HttpResponse response, HttpContext context) throws HttpException, IOException {
-            System.out.println("Running response time interceptor");
-
-            String uri = (String)context.getAttribute(HTTP_REQUEST_URI);
-            Long startTime = (Long)context.getAttribute(HTTP_REQUEST_START_TIME);
-            Long durationMillisecs = (System.nanoTime() - startTime) / 1000000L;
-
-            add(uri, durationMillisecs);
-
-            response.addHeader(EXECUTION_TIME_HEADER_KEY, String.valueOf(durationMillisecs));
-        }
-
-        public void add(String uri, Long durationMillisecs) {
-            uriResponseTime.computeIfAbsent(uri, k -> Collections.synchronizedList(new ArrayList<>()))
-                    .add(durationMillisecs);
-        }
-
-        public void dumpStats() {
-            System.out.println("Dumping response time statistcs...");
-            for (ConcurrentHashMap.Entry<String, List<Long>> pair : uriResponseTime.entrySet()) {
-                String uri = pair.getKey();
-                List<Long> timeDurations = pair.getValue();
-                synchronized (timeDurations) {
-                    Collections.sort(timeDurations);
-                }
-                double multFactor = timeDurations.size() / 100.0;
-                for (Integer percentile : PERCENTILES) {
-                    int idx = (int)(percentile * multFactor);
-                    System.out.println("URI: " + uri + " " + percentile + "th percentile response time " + timeDurations.get(idx) + " millisecs");
-                }
-            }
-
         }
     }
 }
