@@ -34,6 +34,12 @@ import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.http.ConnectionClosedException;
 import org.apache.http.ConnectionReuseStrategy;
@@ -41,6 +47,7 @@ import org.apache.http.HttpException;
 import org.apache.http.HttpHost;
 import org.apache.http.HttpRequest;
 import org.apache.http.HttpResponse;
+import org.apache.http.HttpResponseInterceptor;
 import org.apache.http.impl.DefaultBHttpClientConnection;
 import org.apache.http.impl.DefaultBHttpServerConnection;
 import org.apache.http.impl.DefaultConnectionReuseStrategy;
@@ -73,6 +80,13 @@ public class SimpleReverseProxy {
   private static final String HTTP_OUT_CONN = "http.proxy.out-conn";
   private static final String HTTP_CONN_KEEPALIVE = "http.proxy.conn-keepalive";
 
+  private static final String HTTP_REQUEST_URI = "http.proxy.request.uri";
+
+  private static final Map<String, Map<Integer, Integer>> uriStatusCodefrequencyCount =
+    new HashMap<>();
+
+  private static final Map<String, List<Integer>> uriResponseTime = new HashMap<>();
+
   public static void main(final String[] args) throws Exception {
     if (args.length < 1) {
       System.out.println("Usage: <hostname[:port]> [listener port]");
@@ -86,9 +100,37 @@ public class SimpleReverseProxy {
 
     System.out.println("Reverse proxy to " + targetHost);
 
-    final Thread t = new RequestListenerThread(port, targetHost);
+    ScheduledExecutorService executor = Executors.newScheduledThreadPool(1);
+    executor.scheduleAtFixedRate(new Runnable() {
+      @Override
+      public void run() {
+        try {
+          System.out.println("Thread dumping status codes");
+          for (Map.Entry<String, Map<Integer, Integer>> pair : uriStatusCodefrequencyCount.entrySet()) {
+            String uri = pair.getKey();
+            for (Map.Entry<Integer, Integer> statusCodeCount : pair.getValue().entrySet()) {
+              System.out.println("URI: " + uri + " status: " + statusCodeCount.getKey() + " count: " + statusCodeCount.getValue());
+            }
+          }
+        } catch (Exception e) {
+          System.err.println("error in executing statistics dumper. It will no longer be run!");
+          e.printStackTrace();
+          throw new RuntimeException(e);
+        }
+      }
+    }, 60L, 60L, TimeUnit.SECONDS);
+
+    final Thread t = new RequestListenerThread(port, targetHost, uriStatusCodefrequencyCount);
     t.setDaemon(false);
     t.start();
+
+    Runtime.getRuntime().addShutdownHook(new Thread() {
+      public void run()
+      {
+        System.out.println("Shutdown Hook is running !");
+        executor.shutdown();
+      }
+    });
   }
 
   static class ProxyHandler implements HttpRequestHandler  {
@@ -126,7 +168,8 @@ public class SimpleReverseProxy {
       context.setAttribute(HttpCoreContext.HTTP_CONNECTION, conn);
       context.setAttribute(HttpCoreContext.HTTP_TARGET_HOST, this.target);
 
-      System.out.println(">> Request URI: " + request.getRequestLine().getUri());
+      String uri = request.getRequestLine().getUri();
+      System.out.println(">> Request URI: " + uri);
 
       // Remove hop-by-hop headers
       request.removeHeaders(HTTP.TARGET_HOST);
@@ -160,6 +203,7 @@ public class SimpleReverseProxy {
 
       final boolean keepalive = this.connStrategy.keepAlive(response, context);
       context.setAttribute(HTTP_CONN_KEEPALIVE, new Boolean(keepalive));
+      context.setAttribute(HTTP_REQUEST_URI, request.getRequestLine().getUri());
     }
   }
 
@@ -168,17 +212,21 @@ public class SimpleReverseProxy {
     private final HttpHost target;
     private final ServerSocket serversocket;
     private final HttpService httpService;
+    private final Map<String, Map<Integer, Integer>> uriStatusCodeFrequencyCount;
 
-    public RequestListenerThread(final int port, final HttpHost target) throws IOException {
+    public RequestListenerThread(final int port, final HttpHost target,
+                                 final Map<String, Map<Integer, Integer>> uriStatusCodeFrequencyCount) throws IOException {
       this.target = target;
       this.serversocket = new ServerSocket(port);
+      this.uriStatusCodeFrequencyCount = uriStatusCodeFrequencyCount;
 
       // Set up HTTP protocol processor for incoming connections
       final HttpProcessor inhttpproc = new ImmutableHttpProcessor(
         new ResponseDate(),
         new ResponseServer("Test/1.1"),
         new ResponseContent(),
-        new ResponseConnControl());
+        new ResponseConnControl(),
+        new StatusCodeInterceptor(uriStatusCodeFrequencyCount));
 
       // Set up HTTP protocol processor for outgoing connections
       final HttpProcessor outhttpproc = new ImmutableHttpProcessor(
@@ -264,7 +312,11 @@ public class SimpleReverseProxy {
             break;
           }
 
+          long startTime = System.nanoTime();
           this.httpservice.handleRequest(this.inconn, context);
+          long elapsedTime = System.nanoTime() - startTime;
+
+
 
           final Boolean keepalive = (Boolean) context.getAttribute(HTTP_CONN_KEEPALIVE);
           if (!Boolean.TRUE.equals(keepalive)) {
@@ -289,6 +341,24 @@ public class SimpleReverseProxy {
       }
     }
   }
+
+  static class StatusCodeInterceptor implements HttpResponseInterceptor {
+    private Map<String, Map<Integer, Integer>> uriStatusCodeFrequenyCount;
+
+    public StatusCodeInterceptor(Map<String, Map<Integer, Integer>> uriStatusCodeFrequenyCount) {
+      this.uriStatusCodeFrequenyCount = uriStatusCodeFrequenyCount;
+    }
+
+    public void process(HttpResponse response, HttpContext context) throws HttpException, IOException {
+      System.out.println("Running status code interceptor");
+      String uri = (String)context.getAttribute(HTTP_REQUEST_URI);
+      Integer statusCode = response.getStatusLine().getStatusCode();
+
+      uriStatusCodeFrequenyCount.computeIfAbsent(uri, v -> new HashMap<>())
+        .compute(statusCode, (k, v) -> v == null ? 1 : v + 1);
+    }
+  }
+
 }
 
 
