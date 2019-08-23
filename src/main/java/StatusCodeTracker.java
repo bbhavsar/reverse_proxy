@@ -9,7 +9,7 @@ import java.util.concurrent.atomic.LongAdder;
 
 
 /**
- * Tracks status code and corresponding frequency count.
+ * Tracks status code and corresponding frequencySlots count.
  */
 class StatusCodeTracker implements HttpResponseInterceptor, Tracker {
     // Key is URI and value is map of status code and corresponding counter.
@@ -21,6 +21,10 @@ class StatusCodeTracker implements HttpResponseInterceptor, Tracker {
         String uri = (String)context.getAttribute(Constants.HTTP_REQUEST_URI);
         Integer statusCode = response.getStatusLine().getStatusCode();
 
+        add(uri, statusCode);
+    }
+
+    private void add(String uri, Integer statusCode) {
         uriStatusCodeFrequenyCount.computeIfAbsent(uri, v -> new ConcurrentHashMap<>())
                 .computeIfAbsent(statusCode, k -> new LongAdder()).increment();
     }

@@ -1,6 +1,3 @@
-/**
- * Add a class comment here
- */
 
 /*
  * ====================================================================
@@ -74,7 +71,7 @@ public class SimpleReverseProxy {
     private static final String HTTP_CONN_KEEPALIVE = "http.proxy.conn-keepalive";
 
     private static final StatusCodeTracker statusCodeTracker = new StatusCodeTracker();
-    private static final ResponseTimeTracker timeTracker = new ResponseTimeTracker();
+    private static final ResponseTimeTracker timeTracker = new FixedSlotsResponseTimeTracker();
 
 
     public static void main(final String[] args) throws Exception {
@@ -101,7 +98,7 @@ public class SimpleReverseProxy {
         Runtime.getRuntime().addShutdownHook(new Thread() {
             public void run()
             {
-                System.out.println("Shutdown Hook is running !");
+                System.out.println("Shutdown hook running...");
                 executor.shutdown();
             }
         });
