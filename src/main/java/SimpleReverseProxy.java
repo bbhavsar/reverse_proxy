@@ -35,6 +35,7 @@ import java.util.*;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 
@@ -68,6 +69,8 @@ import org.apache.http.protocol.UriHttpRequestHandlerMapper;
  * */
 public class SimpleReverseProxy {
 
+    private static final Logger LOG = Logger.getLogger(SimpleReverseProxy.class.getName());
+
     private static final String HTTP_IN_CONN = "http.proxy.in-conn";
     private static final String HTTP_OUT_CONN = "http.proxy.out-conn";
     private static final String HTTP_CONN_KEEPALIVE = "http.proxy.conn-keepalive";
@@ -75,8 +78,8 @@ public class SimpleReverseProxy {
     private static final StatusCodeTracker statusCodeTracker = new StatusCodeTracker();
     private static final ResponseTimeTracker timeTracker = new FixedSlotsResponseTimeTracker();
 
-
     public static void main(final String[] args) throws Exception {
+
         // Usage: [listener port]
         int port = 8080;
         if (args.length > 1) {
@@ -124,13 +127,13 @@ public class SimpleReverseProxy {
             if (!conn.isOpen() || conn.isStale()) {
                 final Socket outsocket = new Socket(targetHost.getHostName(), targetHost.getPort() >= 0 ? targetHost.getPort() : 80);
                 conn.bind(outsocket);
-                System.out.println("Outgoing connection to " + outsocket.getInetAddress());
+                LOG.fine("Outgoing connection to " + outsocket.getInetAddress());
             }
 
             context.setAttribute(HttpCoreContext.HTTP_CONNECTION, conn);
             context.setAttribute(HttpCoreContext.HTTP_TARGET_HOST, targetHost);
 
-            System.out.println(">> Request URI: " + uri);
+            LOG.fine(">> Request URI: " + uri);
 
             // Remove hop-by-hop headers
             request.removeHeaders(HTTP.TARGET_HOST);
@@ -162,7 +165,7 @@ public class SimpleReverseProxy {
             response.setHeaders(targetResponse.getAllHeaders());
             response.setEntity(targetResponse.getEntity());
 
-            System.out.println("<< Response: " + response.getStatusLine());
+            LOG.fine("<< Response: " + response.getStatusLine());
 
             final boolean keepalive = this.connStrategy.keepAlive(response, context);
             context.setAttribute(HTTP_CONN_KEEPALIVE, new Boolean(keepalive));
@@ -212,14 +215,14 @@ public class SimpleReverseProxy {
 
         @Override
         public void run() {
-            System.out.println("Listening on port " + this.serversocket.getLocalPort());
+            LOG.fine("Listening on port " + this.serversocket.getLocalPort());
             while (!Thread.interrupted()) {
                 try {
                     final int bufsize = 8 * 1024;
                     // Set up incoming HTTP connection
                     final Socket insocket = this.serversocket.accept();
                     final DefaultBHttpServerConnection inconn = new DefaultBHttpServerConnection(bufsize);
-                    System.out.println("Incoming connection from " + insocket.getInetAddress());
+                    LOG.fine("Incoming connection from " + insocket.getInetAddress());
                     inconn.bind(insocket);
 
                     // Set up outgoing HTTP connection
@@ -258,7 +261,7 @@ public class SimpleReverseProxy {
 
         @Override
         public void run() {
-            System.out.println("New connection thread");
+            LOG.fine("New connection thread");
             final HttpContext context = new BasicHttpContext(null);
 
             // Bind connection objects to the execution context

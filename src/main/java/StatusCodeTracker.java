@@ -15,11 +15,10 @@ import java.util.concurrent.atomic.LongAdder;
 @ThreadSafe
 class StatusCodeTracker implements HttpResponseInterceptor, Tracker {
     // Key is URI and value is map of status code and corresponding counter.
-    private final ConcurrentHashMap<String, ConcurrentHashMap<Integer, LongAdder>> uriStatusCodeFrequenyCount
+    private final ConcurrentHashMap<String, ConcurrentHashMap<Integer, LongAdder>> uriStatusCodeFrequencyCount
             = new ConcurrentHashMap<>();
 
     public void process(HttpResponse response, HttpContext context) throws HttpException, IOException {
-        System.out.println("Running status code interceptor...");
         String uri = (String)context.getAttribute(Constants.HTTP_REQUEST_URI);
         Integer statusCode = response.getStatusLine().getStatusCode();
 
@@ -27,14 +26,14 @@ class StatusCodeTracker implements HttpResponseInterceptor, Tracker {
     }
 
     private void add(String uri, Integer statusCode) {
-        uriStatusCodeFrequenyCount.computeIfAbsent(uri, v -> new ConcurrentHashMap<>())
+        uriStatusCodeFrequencyCount.computeIfAbsent(uri, v -> new ConcurrentHashMap<>())
                 .computeIfAbsent(statusCode, k -> new LongAdder()).increment();
     }
 
     public void dumpStats() {
         System.out.println("Dumping status code statistics...");
         for (ConcurrentHashMap.Entry<String, ConcurrentHashMap<Integer, LongAdder>> pair :
-                uriStatusCodeFrequenyCount.entrySet()) {
+                uriStatusCodeFrequencyCount.entrySet()) {
             String uri = pair.getKey();
             for (ConcurrentHashMap.Entry<Integer, LongAdder> statusCodeCount : pair.getValue().entrySet()) {
                 System.out.println("URI: " + uri + " status: " + statusCodeCount.getKey() + " count: " +

@@ -1,6 +1,5 @@
 import java.util.List;
 
-
 /**
  * Runs and dumps statistics of all trackers.
  */
