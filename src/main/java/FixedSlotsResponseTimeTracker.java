@@ -1,4 +1,6 @@
 
+import org.apache.http.annotation.ThreadSafe;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
@@ -9,7 +11,9 @@ import java.util.stream.Collectors;
  * Response time tracker that uses fixed slots and hence bounded memory
  * for tracking response times.
 */
+@ThreadSafe
 public class FixedSlotsResponseTimeTracker extends ResponseTimeTracker {
+
     // 1000 slots for millisec from 0 to 999 which stores the frequency at that millisec.
     private static final Integer NUM_MILLISEC_SLOTS = 1000;
     // Next 10 slots for second granularity.
@@ -36,7 +40,7 @@ public class FixedSlotsResponseTimeTracker extends ResponseTimeTracker {
         }
     }
 
-    // Key is URI and value is array for storing frequencySlots count for that millisec.
+    // Key is URI and value is array for storing frequency count for that millisec.
     private final ConcurrentHashMap<String, FrequencyCountSlots> uriResponseTime = new ConcurrentHashMap<>();
 
     private int getSlotIndex(Long durationMillisecs) {

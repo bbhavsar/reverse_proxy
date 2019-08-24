@@ -8,7 +8,8 @@ import java.io.IOException;
 import java.util.List;
 
 public abstract class ResponseTimeTracker implements HttpResponseInterceptor, Tracker {
-    protected static final List<Integer> PERCENTILES = ImmutableList.of(25, 50, 75, 90, 99);
+    // Sorted list of percentiles tracker aims to log.
+    protected static final List<Integer> PERCENTILES = ImmutableList.of(25, 50, 75, 90, 99, 100);
 
     public void process(HttpResponse response, HttpContext context) throws HttpException, IOException {
         System.out.println("Running response time interceptor");

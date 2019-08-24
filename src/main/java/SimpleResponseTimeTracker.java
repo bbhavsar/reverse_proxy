@@ -1,3 +1,5 @@
+import org.apache.http.annotation.ThreadSafe;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -7,8 +9,9 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Tracks time per request to be used for dumping statistics.
  * Simple naive implementation that stores every timestamp and hence grows unbounded.
- * XXX: Not used in the implementation.
+ * XXX: Not used in the current implementation.
  */
+@ThreadSafe
 class SimpleResponseTimeTracker extends ResponseTimeTracker {
     // Key is URI and value is list of unsorted time duration for each URI for quick addition.
     private final ConcurrentHashMap<String, List<Long>> uriResponseTime = new ConcurrentHashMap<>();

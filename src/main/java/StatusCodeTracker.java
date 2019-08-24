@@ -1,6 +1,7 @@
 import org.apache.http.HttpException;
 import org.apache.http.HttpResponse;
 import org.apache.http.HttpResponseInterceptor;
+import org.apache.http.annotation.ThreadSafe;
 import org.apache.http.protocol.HttpContext;
 
 import java.io.IOException;
@@ -11,6 +12,7 @@ import java.util.concurrent.atomic.LongAdder;
 /**
  * Tracks status code and corresponding frequencySlots count.
  */
+@ThreadSafe
 class StatusCodeTracker implements HttpResponseInterceptor, Tracker {
     // Key is URI and value is map of status code and corresponding counter.
     private final ConcurrentHashMap<String, ConcurrentHashMap<Integer, LongAdder>> uriStatusCodeFrequenyCount

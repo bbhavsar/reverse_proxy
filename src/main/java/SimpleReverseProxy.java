@@ -35,6 +35,7 @@ import java.util.*;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.logging.Logger;
 
 
 import org.apache.http.*;
@@ -63,7 +64,8 @@ import org.apache.http.protocol.UriHttpRequestHandlerMapper;
 
 /**
  * Elemental HTTP/1.1 reverse proxy.
- */
+ * From: https://hc.apache.org/httpcomponents-core-ga/httpcore/examples/org/apache/http/examples/ElementalReverseProxy.java
+ * */
 public class SimpleReverseProxy {
 
     private static final String HTTP_IN_CONN = "http.proxy.in-conn";
@@ -75,48 +77,34 @@ public class SimpleReverseProxy {
 
 
     public static void main(final String[] args) throws Exception {
-        if (args.length < 1) {
-            System.out.println("Usage: <hostname[:port]> [listener port]");
-            System.exit(1);
-        }
-        final HttpHost targetHost = new HttpHost(args[0]);
+        // Usage: [listener port]
         int port = 8080;
         if (args.length > 1) {
-            port = Integer.parseInt(args[1]);
+            port = Integer.parseInt(args[0]);
         }
-
-        System.out.println("Reverse proxy to " + targetHost);
 
         ScheduledExecutorService executor = Executors.newScheduledThreadPool(1);
         executor.scheduleAtFixedRate(new StatsRunner(Arrays.asList(statusCodeTracker, timeTracker)),
                 10L, 10L, TimeUnit.SECONDS);
 
-        final Thread t = new RequestListenerThread(port, targetHost, statusCodeTracker, timeTracker);
+        final Thread t = new RequestListenerThread(port, statusCodeTracker, timeTracker);
         t.setDaemon(false);
         t.start();
+        t.join();
 
-        Runtime.getRuntime().addShutdownHook(new Thread() {
-            public void run()
-            {
-                System.out.println("Shutdown hook running...");
-                executor.shutdown();
-            }
-        });
+        executor.shutdown();
     }
 
     static class ProxyHandler implements HttpRequestHandler  {
 
-        private HttpHost target;
         private final HttpProcessor httpproc;
         private final HttpRequestExecutor httpexecutor;
         private final ConnectionReuseStrategy connStrategy;
 
         public ProxyHandler(
-                final HttpHost target,
                 final HttpProcessor httpproc,
                 final HttpRequestExecutor httpexecutor) {
             super();
-            this.target = target;
             this.httpproc = httpproc;
             this.httpexecutor = httpexecutor;
             this.connStrategy = DefaultConnectionReuseStrategy.INSTANCE;
@@ -130,16 +118,18 @@ public class SimpleReverseProxy {
             final DefaultBHttpClientConnection conn = (DefaultBHttpClientConnection) context.getAttribute(
                     HTTP_OUT_CONN);
 
+            String uri = request.getRequestLine().getUri();
+            HttpHost targetHost = URITargetHostMapping.getTargetHost(uri);
+
             if (!conn.isOpen() || conn.isStale()) {
-                final Socket outsocket = new Socket(this.target.getHostName(), this.target.getPort() >= 0 ? this.target.getPort() : 80);
+                final Socket outsocket = new Socket(targetHost.getHostName(), targetHost.getPort() >= 0 ? targetHost.getPort() : 80);
                 conn.bind(outsocket);
                 System.out.println("Outgoing connection to " + outsocket.getInetAddress());
             }
 
             context.setAttribute(HttpCoreContext.HTTP_CONNECTION, conn);
-            context.setAttribute(HttpCoreContext.HTTP_TARGET_HOST, this.target);
+            context.setAttribute(HttpCoreContext.HTTP_TARGET_HOST, targetHost);
 
-            String uri = request.getRequestLine().getUri();
             System.out.println(">> Request URI: " + uri);
 
             // Remove hop-by-hop headers
@@ -182,14 +172,12 @@ public class SimpleReverseProxy {
 
     static class RequestListenerThread extends Thread {
 
-        private final HttpHost target;
         private final ServerSocket serversocket;
         private final HttpService httpService;
 
-        public RequestListenerThread(final int port, final HttpHost target,
+        public RequestListenerThread(final int port,
                                      final StatusCodeTracker statusCodeTracker,
                                      final ResponseTimeTracker responseTimeTracker) throws IOException {
-            this.target = target;
             this.serversocket = new ServerSocket(port);
 
             // Set up HTTP protocol processor for incoming connections
@@ -214,10 +202,9 @@ public class SimpleReverseProxy {
 
             // Set up incoming request handler
             final UriHttpRequestHandlerMapper reqistry = new UriHttpRequestHandlerMapper();
-            reqistry.register("*", new ProxyHandler(
-                    this.target,
-                    outhttpproc,
-                    httpexecutor));
+
+            ProxyHandler proxyHandler = new ProxyHandler(outhttpproc, httpexecutor);
+            reqistry.register("*", proxyHandler);
 
             // Set up the HTTP service
             this.httpService = new HttpService(inhttpproc, reqistry);
