@@ -8,12 +8,11 @@ import java.util.concurrent.atomic.LongAdder;
 import java.util.stream.Collectors;
 
 /**
- * Response time tracker that uses fixed slots and hence bounded memory
+ * Approximate response time tracker that uses fixed slots and hence bounded memory
  * for tracking response times.
 */
 @ThreadSafe
 public class FixedSlotsResponseTimeTracker extends ResponseTimeTracker {
-
     // 1000 slots for millisec from 0 to 999 which stores the frequency at that millisec.
     private static final Integer NUM_MILLISEC_SLOTS = 1000;
     // Next 10 slots for second granularity.
@@ -21,6 +20,9 @@ public class FixedSlotsResponseTimeTracker extends ResponseTimeTracker {
     // Basically granularity is millisecs upto 1 sec and seconds thereafter.
     private static final Integer NUM_SEC_SLOTS = 10;
     private static final Integer NUM_TOTAL_SLOTS = NUM_MILLISEC_SLOTS + NUM_SEC_SLOTS;
+
+    // Key is URI and value is array for storing frequency count for that millisec.
+    private final ConcurrentHashMap<String, FrequencyCountSlots> uriResponseTime = new ConcurrentHashMap<>();
 
     private static class FrequencyCountSlots {
         public LongAdder[] frequencySlots;
@@ -34,29 +36,25 @@ public class FixedSlotsResponseTimeTracker extends ResponseTimeTracker {
             totalFrequencyCount = new LongAdder();
         }
 
-        public void add(int slotIdx) {
+        public void add(Long durationMillisecs) {
+            int slotIdx = getSlotIndex(durationMillisecs);
             frequencySlots[slotIdx].increment();
             totalFrequencyCount.increment();
         }
-    }
 
-    // Key is URI and value is array for storing frequency count for that millisec.
-    private final ConcurrentHashMap<String, FrequencyCountSlots> uriResponseTime = new ConcurrentHashMap<>();
-
-    private int getSlotIndex(Long durationMillisecs) {
-        if (durationMillisecs < NUM_MILLISEC_SLOTS) {
-            return durationMillisecs.intValue();
-        } else {
-            Long secs = durationMillisecs / NUM_MILLISEC_SLOTS;
-            int slotIdx = NUM_MILLISEC_SLOTS + (int)(secs - 1);
-            return slotIdx >= NUM_TOTAL_SLOTS ? NUM_TOTAL_SLOTS - 1 : slotIdx;
+        private int getSlotIndex(Long durationMillisecs) {
+            if (durationMillisecs < NUM_MILLISEC_SLOTS) {
+                return durationMillisecs.intValue();
+            } else {
+                Long secs = durationMillisecs / NUM_MILLISEC_SLOTS;
+                int slotIdx = NUM_MILLISEC_SLOTS + (int)(secs - 1);
+                return slotIdx >= NUM_TOTAL_SLOTS ? NUM_TOTAL_SLOTS - 1 : slotIdx;
+            }
         }
     }
 
     protected void add(String uri, Long durationMillisecs) {
-        int slotIdx = getSlotIndex(durationMillisecs);
-
-        uriResponseTime.computeIfAbsent(uri, k -> new FrequencyCountSlots()).add(slotIdx);
+        uriResponseTime.computeIfAbsent(uri, k -> new FrequencyCountSlots()).add(durationMillisecs);
     }
 
     public void dumpStats() {
@@ -75,6 +73,7 @@ public class FixedSlotsResponseTimeTracker extends ResponseTimeTracker {
             List<Integer> percentileValueList = new ArrayList<>();
             int percentileIdx = 0;
 
+            // Millisecond granularity
             for (int millisecIdx = 0; millisecIdx < NUM_MILLISEC_SLOTS &&
                     percentileIdx < percentileIdxList.size(); millisecIdx++) {
                 cumulativeFrequencyCount += slots[millisecIdx].longValue();
@@ -85,6 +84,7 @@ public class FixedSlotsResponseTimeTracker extends ResponseTimeTracker {
                 }
             }
 
+            // Second granularity
             for (int secIdx = 0; secIdx < NUM_SEC_SLOTS && percentileIdx < percentileIdxList.size(); secIdx++) {
                 int slotIdx = NUM_MILLISEC_SLOTS + secIdx;
                 cumulativeFrequencyCount += slots[slotIdx].longValue();
